@@ -65,6 +65,9 @@ class App : Application() {
 
         lateinit var lm: LocationManager
             private set
+
+        lateinit var deviceId: String
+            private set
     }
 
     override fun onCreate() {
@@ -73,6 +76,7 @@ class App : Application() {
         cm = this.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         lm = this.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         prefs = this.getSharedPreferences(PREFS_FILENAME, Context.MODE_PRIVATE)
+        deviceId = Settings.Secure.getString(this.contentResolver, Settings.Secure.ANDROID_ID)
     }
 }
 
@@ -134,13 +138,13 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         var intent = Intent(getBaseContext(), LocationTrackingService::class.java)
-        var servicerunning = isServiceRunning(LocationTrackingService::class.java)
+        var RUNNING = isServiceRunning(LocationTrackingService::class.java)
 
         var endpoint: EditText? = null
         var user: EditText? = null
         var pass: EditText? = null
         var switchLabel = "Stopped"
-        if (servicerunning) {
+        if (RUNNING) {
             switchLabel = "Running"
         }
 
@@ -165,7 +169,7 @@ class MainActivity : AppCompatActivity() {
                     switchCompat {
                         text = switchLabel
                         textSize = 18f
-                        isChecked = servicerunning
+                        isChecked = RUNNING
                         setOnCheckedChangeListener { buttonView, isChecked ->
                             if (isChecked) {
                                 startService(intent)
@@ -261,31 +265,15 @@ class MainActivity : AppCompatActivity() {
     }
 }
 
-//if (requestCode == 123) {
-//        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            // Permission granted.
-            //doLocationAccessRelatedJob();
-        //}
-        //else {
-        //    // User refused to grant permission. You can add AlertDialog here
-        //    Toast.makeText(this, "You didn't give permission to access device location", Toast.LENGTH_LONG).show();
-        //    startInstalledAppDetailsActivity();
-        //}
-
-object NotificationID {
+private object notificationID {
     private val c = AtomicInteger(0)
     val id: Int
         get() = c.incrementAndGet()
 }
 
 
-
 class LocationTrackingService    : Service() {
-    var locationManager: LocationManager? = null
     var notifID: Int = 0
-
-
-    //: Notification? = null
 
     override fun onBind(intent: Intent?) = null
 
@@ -296,31 +284,30 @@ class LocationTrackingService    : Service() {
     }
 
     override fun onCreate() {
-        if (locationManager == null)
-            locationManager = applicationContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         try {
             var listener = locationListeners[0]
-            listener.deviceID = Settings.Secure.getString(applicationContext.getContentResolver(), Settings.Secure.ANDROID_ID)
             locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, INTERVAL, DISTANCE, listener)
         } catch (e: SecurityException) {
             Log.e(TAG, "Fail to request location update", e)
         } catch (e: IllegalArgumentException) {
             Log.e(TAG, "GPS provider does not exist", e)
         }
-        Log.i(TAG, "look good")
+
         FuelManager.instance.baseHeaders = mapOf(
                 "User-Agent" to "Are You Tracking Me? - ${BuildConfig.VERSION_NAME}")
+
         var notif = NotificationCompat.Builder(this@LocationTrackingService)
                 .setContentTitle("Yes, I'm tracking you!")
                 .setSubText("Running")
                 .setOngoing(true)
+                .setVisibility(NotificationCompat.VISIBILITY_SECRET)
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .build()
+
         val mNotifyMgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-// Builds the notification and issues it.
-        notifID = NotificationID.id
+        // Builds the notification and issues it.
+        notifID = notificationID.id
         mNotifyMgr.notify(notifID, notif)
-        RUNNING = true
     }
 
     override fun onDestroy() {
@@ -335,14 +322,11 @@ class LocationTrackingService    : Service() {
                     Log.w(TAG, "Failed to remove location listeners")
                 }
             }
-
-        RUNNING = false
     }
 
 
     companion object {
         val TAG = "LocationTrackingService"
-        var RUNNING = false
         //val INTERVAL = 600000.toLong()
         val INTERVAL = 5000.toLong()
         val DISTANCE = 0.toFloat() // In meters
@@ -356,7 +340,6 @@ class LocationTrackingService    : Service() {
         class LTRLocationListener(provider: String) : android.location.LocationListener {
 
             val lastLocation = Location(provider)
-            var deviceID: String? = null
 
             override fun onLocationChanged(location: Location?) {
                 lastLocation.set(location)
@@ -365,25 +348,26 @@ class LocationTrackingService    : Service() {
                 payload.put("lat", location!!.latitude)
                 payload.put("lng", location!!.longitude)
                 payload.put("ts", ts)
-                payload.put("device_id", this.deviceID!!)
+                payload.put("device_id", App.deviceId)
 
                 Log.i(TAG, "Sending payload to server")
 
+                // Fetch creds from settings
                 val endpoint = App.prefs!!.getString("endpoint", "")
                 val user = App.prefs!!.getString("user", "")
                 val pass = App.prefs!!.getString("pass", "")
-                // TODO get the connectivitymanager the same way as the android id
-                //var cm: ConnectivityManager = .getSystemService(Context.CONNECTIVITY_SERVICE)
+
                 var activeNetwork: NetworkInfo  = App.cm.getActiveNetworkInfo()
                 if (activeNetwork != null) {
                     if (activeNetwork.isConnectedOrConnecting()) {
-
+                        // TODO use this, try to POST data, and POST previous offline saved data
+                        // TODO ge0 bulk support?
                     }
                 }
                 App.instance.applicationContext.database.use {
                     val values = ContentValues()
-                    //values.put("lat", 1.0)
-                    //values.put("lng", 2.0)
+                    values.put("lat", location!!.latitude)
+                    values.put("lng", location!!.longitude)
                     values.put("ts", ts)
                     values.put("_id", ts)
                     insert("locations", null, values)
