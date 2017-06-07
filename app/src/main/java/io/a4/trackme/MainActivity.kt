@@ -15,6 +15,7 @@ import android.util.Log
 import android.support.v7.app.AppCompatActivity
 import android.support.v4.app.ActivityCompat
 import android.os.Bundle
+import android.os.Handler
 import android.support.v7.app.NotificationCompat
 import com.github.kittinunf.fuel.Fuel
 import com.github.kittinunf.result.Result
@@ -24,6 +25,7 @@ import org.jetbrains.anko.appcompat.v7.tintedEditText
 import org.jetbrains.anko.design.textInputLayout
 import android.provider.Settings
 import android.support.v4.content.LocalBroadcastManager
+import android.support.v4.widget.SwipeRefreshLayout
 import android.support.v7.widget.SwitchCompat
 import android.text.InputType
 import android.text.format.DateFormat
@@ -37,6 +39,7 @@ import org.jetbrains.anko.appcompat.v7.tintedButton
 import org.jetbrains.anko.appcompat.v7.tintedTextView
 import org.jetbrains.anko.custom.ankoView
 import org.jetbrains.anko.db.*
+import org.jetbrains.anko.support.v4.swipeRefreshLayout
 import java.util.concurrent.atomic.AtomicInteger
 
 
@@ -77,7 +80,7 @@ class App : Application() {
     }
 }
 
-class DbHelper : ManagedSQLiteOpenHelper(App.instance, "locations.db", null, 1) {
+class DbHelper : ManagedSQLiteOpenHelper(App.instance, "locations.db", null, 2) {
 
     companion object {
         val instance by lazy { DbHelper() }
@@ -90,10 +93,17 @@ class DbHelper : ManagedSQLiteOpenHelper(App.instance, "locations.db", null, 1) 
                 //"lng" to REAL,
                 "ts" to INTEGER
         )
+        db?.createTable("logs", true,
+                "_id" to INTEGER + PRIMARY_KEY,
+                "status_code" to INTEGER,
+                "response" to TEXT
+        )
     }
+
 
     override fun onUpgrade(db: SQLiteDatabase?, oldVersion: Int, newVersion: Int) {
         db?.dropTable("locations", true)
+        db?.dropTable("logs", true)
         onCreate(db)
     }
 }
@@ -102,6 +112,8 @@ val Context.database: DbHelper
     get() = DbHelper.instance
 
 class Loc(val _id: Int, val ts: Int)
+class ReqLog(val _id: Int, val status_code: Int, val response: String)
+val logParser = classParser<ReqLog>()
 
 class MainActivity : AppCompatActivity() {
 
@@ -136,86 +148,93 @@ class MainActivity : AppCompatActivity() {
             switchLabel = "Running"
         }
 
-
-        scrollView {
-            verticalLayout {
-                padding = dip(16)
-                tintedTextView {
-                    textSize = 18f
-                    text = "Status"
-                    //gravity = Gravity.CENTER
-                    bottomPadding = dip(12)
-                }
-                switchCompat {
-                    text = switchLabel
-                    textSize = 18f
-                    isChecked = servicerunning
-                    setOnCheckedChangeListener { buttonView, isChecked ->
-                        if (isChecked) {
-                            startService(intent)
-                            this.text = "Running"
-                            toast("Service started")
-                        } else {
-                            stopService(intent)
-                            this.text = "Stopped"
-                            toast("Service stopped")
+        swipeRefreshLayout {
+            setOnRefreshListener {
+                toast("refreshed")
+               this.isRefreshing = false
+                // TODO reload the logs
+            }
+                scrollView {
+                    verticalLayout {
+                        padding = dip(16)
+                        tintedTextView {
+                            textSize = 18f
+                            text = "Status"
+                            //gravity = Gravity.CENTER
+                            bottomPadding = dip(12)
                         }
-                    }
-                    bottomPadding = dip(24)
-                }
-                lastReq = tintedTextView {
-                    text = ""
-                }
-                lastErr = tintedTextView {
-                    text = ""
-                    bottomPadding = dip(24)
-                }
-                tintedTextView {
-                    textSize = 18f
-                    text = "Settings"
-                    //gravity = Gravity.CENTER
-                    bottomPadding = dip(24)
-                }
-                textInputLayout {
-                    endpoint = tintedEditText {
-                        hint = "HTTP Endpoint URL"
-                        singleLine = true
-                    }
-                }.lparams(width = matchParent, height = wrapContent)
-                textInputLayout {
-                    user = tintedEditText {
-                        hint = "Username"
-                        singleLine = true
-                    }
-                }.lparams(width = matchParent, height = wrapContent)
-                textInputLayout {
-                    pass = tintedEditText {
-                        hint = "Password"
-                        singleLine = true
-                        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-                    }
-                }.lparams(width = matchParent, height = wrapContent)
+                        switchCompat {
+                            text = switchLabel
+                            textSize = 18f
+                            isChecked = servicerunning
+                            setOnCheckedChangeListener { buttonView, isChecked ->
+                                if (isChecked) {
+                                    startService(intent)
+                                    this.text = "Running"
+                                    toast("Service started")
+                                } else {
+                                    stopService(intent)
+                                    this.text = "Stopped"
+                                    toast("Service stopped")
+                                }
+                            }
+                            bottomPadding = dip(24)
+                        }
+                        lastReq = tintedTextView {
+                            text = ""
+                        }
+                        lastErr = tintedTextView {
+                            text = ""
+                            bottomPadding = dip(24)
+                        }
+                        tintedTextView {
+                            textSize = 18f
+                            text = "Settings"
+                            //gravity = Gravity.CENTER
+                            bottomPadding = dip(24)
+                        }
+                        textInputLayout {
+                            endpoint = tintedEditText {
+                                hint = "HTTP Endpoint URL"
+                                singleLine = true
+                            }
+                        }.lparams(width = matchParent, height = wrapContent)
+                        textInputLayout {
+                            user = tintedEditText {
+                                hint = "Username"
+                                singleLine = true
+                            }
+                        }.lparams(width = matchParent, height = wrapContent)
+                        textInputLayout {
+                            pass = tintedEditText {
+                                hint = "Password"
+                                singleLine = true
+                                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                            }
+                        }.lparams(width = matchParent, height = wrapContent)
 
 
-                endpoint!!.setText(App.prefs!!.getString("endpoint", ""))
-                user!!.setText(App.prefs!!.getString("user", ""))
-                pass!!.setText(App.prefs!!.getString("pass", ""))
-                lastReq!!.setText("Last request: ${App.prefs!!.getString("last_request", "never")}")
-                lastErr!!.setText("Last error: ${App.prefs!!.getString("last_error", "never")}")
-                tintedButton("Save") {
-                    setOnClickListener {
-                        val editor = App.prefs!!.edit()
-                        editor.putString("endpoint", endpoint!!.text.toString())
-                        editor.putString("user", user!!.text.toString())
-                        editor.putString("pass", pass!!.text.toString())
-                        editor.apply()
+                        endpoint!!.setText(App.prefs!!.getString("endpoint", ""))
+                        user!!.setText(App.prefs!!.getString("user", ""))
+                        pass!!.setText(App.prefs!!.getString("pass", ""))
+                        lastReq!!.setText("Last request: ${App.prefs!!.getString("last_request", "never")}")
+                        lastErr!!.setText("Last error: ${App.prefs!!.getString("last_error", "never")}")
+                        tintedButton("Save") {
+                            setOnClickListener {
+                                val editor = App.prefs!!.edit()
+                                editor.putString("endpoint", endpoint!!.text.toString())
+                                editor.putString("user", user!!.text.toString())
+                                editor.putString("pass", pass!!.text.toString())
+                                editor.apply()
 
-                        lastReq!!.setText("Last request omg: ${App.prefs!!.getString("last_error", "never")}")
-                        longToast("Settings saved")
+                                lastReq!!.setText("Last request omg: ${App.prefs!!.getString("last_error", "never")}")
+                                longToast("Settings saved")
+                            }
+                        }
                     }
                 }
             }
-        }
+
 
         if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this@MainActivity, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 123)
@@ -228,10 +247,10 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         toast("onresume")
         database.use {
-            var data = select("locations", "_id", "ts").parseList(classParser<Loc>())
+            var data = select("logs", "_id", "status_code", "response").parseList(logParser)
 
             I++
-            lastReq!!.setText("Last request ${data}: ${App.prefs!!.getString("last_error", "never")}")
+            lastReq!!.setText("Last request\n\n ${data}: ${App.prefs!!.getString("last_error", "never")}")
         }
     }
 
@@ -368,26 +387,29 @@ class LocationTrackingService    : Service() {
                     insert("locations", null, values)
                 }
 
-                //doAsync {
-                    val editor = App.prefs!!.edit()
+                doAsync {
                     val date = DateFormat.format("yyyy-MM-ddThh:mm:ss a", java.util.Date()).toString()
-                    editor.putString("last_request", date)
                     Fuel.post(endpoint).authenticate(user, pass).body(payload.toString()).response { _, response, result ->
+                        App.instance.applicationContext.database.use {
+                            val values = ContentValues()
+                            values.put("status_code", response.httpStatusCode)
+                            values.put("response", String(response.data))
+                            values.put("_id", ts)
+                            insert("logs", null, values)
+                        }
                         when (result) {
                             is Result.Failure -> {
                                 val body = String(response.data)
                                 val code = response.httpStatusCode
                                 Log.e(TAG, "failed to send payload $code: $body")
-                                editor.putString("last_error", "$date, error $code: $body")
-                                editor.commit()
+
                             }
                             is Result.Success -> {
                                 Log.i(TAG, "payload sent")
-                                editor.commit()
                             }
                         }
                     }
-                //}
+                }
             }
             override fun onProviderDisabled(provider: String?) {
             }
