@@ -65,9 +65,6 @@ class App : Application() {
 
         lateinit var lm: LocationManager
             private set
-
-        lateinit var broadcaster: LocalBroadcastManager
-            private set
     }
 
     override fun onCreate() {
@@ -76,11 +73,10 @@ class App : Application() {
         cm = this.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         lm = this.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         prefs = this.getSharedPreferences(PREFS_FILENAME, Context.MODE_PRIVATE)
-        broadcaster = LocalBroadcastManager.getInstance(this)
     }
 }
 
-class DbHelper : ManagedSQLiteOpenHelper(App.instance, "locations.db", null, 4) {
+class DbHelper : ManagedSQLiteOpenHelper(App.instance, "locations.db", null, 5) {
 
     companion object {
         val instance by lazy { DbHelper() }
@@ -89,8 +85,8 @@ class DbHelper : ManagedSQLiteOpenHelper(App.instance, "locations.db", null, 4) 
     override fun onCreate(db: SQLiteDatabase?) {
         db?.createTable("locations", true,
                 "_id" to INTEGER + PRIMARY_KEY,
-                //"lat" to REAL,
-                //"lng" to REAL,
+                "lat" to REAL,
+                "lng" to REAL,
                 "ts" to INTEGER
         )
         db?.createTable("logs", true,
@@ -112,14 +108,14 @@ class DbHelper : ManagedSQLiteOpenHelper(App.instance, "locations.db", null, 4) 
 val Context.database: DbHelper
     get() = DbHelper.instance
 
-class Loc(val _id: Int, val ts: Int)
+class Loc(val _id: Int, val ts: Int, val lat: Float, val lng: Float)
+val locParser = classParser<Loc>()
 class ReqLog(val _id: Int, val date: String, val status_code: Int, val response: String)
 val logParser = classParser<ReqLog>()
 
 class MainActivity : AppCompatActivity() {
 
-    var lastReq: TextView? = null
-    var I: Int = 0
+    var logsView: TextView? = null
 
     // Custom method to determine whether a service is running
     fun isServiceRunning(serviceClass: Class<*>): Boolean {
@@ -150,116 +146,114 @@ class MainActivity : AppCompatActivity() {
 
         swipeRefreshLayout {
             setOnRefreshListener {
-                toast("refreshed")
-               this.isRefreshing = false
-                // TODO reload the logs
+                reloadLogs()
+                this.isRefreshing = false
+                toast("logs reloaded successfully")
             }
-                scrollView {
-                    verticalLayout {
-                        // Prevent the initial input focus
-                        isFocusableInTouchMode = true
+            scrollView {
+                verticalLayout {
+                    // Prevent the initial input focus
+                    isFocusableInTouchMode = true
+                    padding = dip(16)
 
-                        padding = dip(16)
-                        tintedTextView {
-                            textSize = 18f
-                            text = "Status"
-                            //gravity = Gravity.CENTER
-                            bottomPadding = dip(12)
-                        }
-                        switchCompat {
-                            text = switchLabel
-                            textSize = 18f
-                            isChecked = servicerunning
-                            setOnCheckedChangeListener { buttonView, isChecked ->
-                                if (isChecked) {
-                                    startService(intent)
-                                    this.text = "Running"
-                                    toast("Service started")
-                                } else {
-                                    stopService(intent)
-                                    this.text = "Stopped"
-                                    toast("Service stopped")
-                                }
+                    // Status section
+                    tintedTextView {
+                        textSize = 18f
+                        text = "Status"
+                        bottomPadding = dip(12)
+                    }
+                    switchCompat {
+                        text = switchLabel
+                        textSize = 18f
+                        isChecked = servicerunning
+                        setOnCheckedChangeListener { buttonView, isChecked ->
+                            if (isChecked) {
+                                startService(intent)
+                                this.text = "Running"
+                                toast("Service started")
+                            } else {
+                                stopService(intent)
+                                this.text = "Stopped"
+                                toast("Service stopped")
                             }
-                            bottomPadding = dip(24)
                         }
-                        tintedTextView {
-                            textSize = 18f
-                            text = "Logs"
-                            //gravity = Gravity.CENTER
-                            bottomPadding = dip(12)
-                        }
-                        lastReq = tintedTextView {
-                            text = ""
-                        } // TODO rename to logs and style it?
-                        tintedTextView {
-                            textSize = 18f
-                            text = "Settings"
-                            //gravity = Gravity.CENTER
-                            bottomPadding = dip(24)
-                        }
-                        textInputLayout {
-                            endpoint = tintedEditText {
-                                hint = "HTTP Endpoint URL"
-                                singleLine = true
-                            }
-                        }.lparams(width = matchParent, height = wrapContent)
-                        textInputLayout {
-                            user = tintedEditText {
-                                hint = "Username"
-                                singleLine = true
-                            }
-                        }.lparams(width = matchParent, height = wrapContent)
-                        textInputLayout {
-                            pass = tintedEditText {
-                                hint = "Password"
-                                singleLine = true
-                                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-                            }
-                        }.lparams(width = matchParent, height = wrapContent)
+                        bottomPadding = dip(24)
+                    }
 
+                    // Logs section
+                    tintedTextView {
+                        textSize = 18f
+                        text = "Logs"
+                        bottomPadding = dip(12)
+                    }
+                    logsView = tintedTextView {
+                        text = ""
+                    }
 
-                        endpoint!!.setText(App.prefs!!.getString("endpoint", ""))
-                        user!!.setText(App.prefs!!.getString("user", ""))
-                        pass!!.setText(App.prefs!!.getString("pass", ""))
-                        lastReq!!.setText("Last request: ${App.prefs!!.getString("last_request", "never")}")
-                        tintedButton("Save") {
-                            setOnClickListener {
-                                val editor = App.prefs!!.edit()
-                                editor.putString("endpoint", endpoint!!.text.toString())
-                                editor.putString("user", user!!.text.toString())
-                                editor.putString("pass", pass!!.text.toString())
-                                editor.apply()
+                    // Settings section
+                    tintedTextView {
+                        textSize = 18f
+                        text = "Settings"
+                        bottomPadding = dip(24)
+                    }
+                    textInputLayout {
+                        endpoint = tintedEditText {
+                            hint = "HTTP Endpoint URL"
+                            singleLine = true
+                        }
+                    }.lparams(width = matchParent, height = wrapContent)
+                    textInputLayout {
+                        user = tintedEditText {
+                            hint = "Username"
+                            singleLine = true
+                        }
+                    }.lparams(width = matchParent, height = wrapContent)
+                    textInputLayout {
+                        pass = tintedEditText {
+                            hint = "Password"
+                            singleLine = true
+                            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                        }
+                    }.lparams(width = matchParent, height = wrapContent)
 
-                                lastReq!!.setText("Last request omg: ${App.prefs!!.getString("last_error", "never")}")
-                                longToast("Settings saved")
-                            }
+                    endpoint!!.setText(App.prefs!!.getString("endpoint", ""))
+                    user!!.setText(App.prefs!!.getString("user", ""))
+                    pass!!.setText(App.prefs!!.getString("pass", ""))
+                    tintedButton("Save") {
+                        setOnClickListener {
+                            val editor = App.prefs!!.edit()
+                            editor.putString("endpoint", endpoint!!.text.toString())
+                            editor.putString("user", user!!.text.toString())
+                            editor.putString("pass", pass!!.text.toString())
+                            editor.apply()
+                            longToast("Settings saved")
                         }
                     }
                 }
             }
+        }
 
-
+        // Ensure the ACCESS_FINE_LOCATION permission is granted
         if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this@MainActivity, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 123)
         }
-
-
     }
 
-    override fun onResume() {
-        super.onResume()
-        toast("onresume")
+    private fun reloadLogs() {
         database.use {
             var out: String = ""
             val logs = select("logs", "_id", "date", "status_code", "response").parseList(logParser)
             for (log in logs) {
                 out = out + "${log.date}: ${log.status_code} => ${log.response}\n"
             }
-            I++
             // TODO remov oldest logs and only keep last 5
-            lastReq!!.setText(out)
+            logsView!!.setText(out)
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        reloadLogs()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
