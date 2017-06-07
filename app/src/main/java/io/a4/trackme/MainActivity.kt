@@ -80,7 +80,7 @@ class App : Application() {
     }
 }
 
-class DbHelper : ManagedSQLiteOpenHelper(App.instance, "locations.db", null, 2) {
+class DbHelper : ManagedSQLiteOpenHelper(App.instance, "locations.db", null, 4) {
 
     companion object {
         val instance by lazy { DbHelper() }
@@ -95,6 +95,7 @@ class DbHelper : ManagedSQLiteOpenHelper(App.instance, "locations.db", null, 2) 
         )
         db?.createTable("logs", true,
                 "_id" to INTEGER + PRIMARY_KEY,
+                "date" to TEXT,
                 "status_code" to INTEGER,
                 "response" to TEXT
         )
@@ -112,7 +113,7 @@ val Context.database: DbHelper
     get() = DbHelper.instance
 
 class Loc(val _id: Int, val ts: Int)
-class ReqLog(val _id: Int, val status_code: Int, val response: String)
+class ReqLog(val _id: Int, val date: String, val status_code: Int, val response: String)
 val logParser = classParser<ReqLog>()
 
 class MainActivity : AppCompatActivity() {
@@ -142,7 +143,6 @@ class MainActivity : AppCompatActivity() {
         var endpoint: EditText? = null
         var user: EditText? = null
         var pass: EditText? = null
-        var lastErr: TextView? = null
         var switchLabel = "Stopped"
         if (servicerunning) {
             switchLabel = "Running"
@@ -156,6 +156,9 @@ class MainActivity : AppCompatActivity() {
             }
                 scrollView {
                     verticalLayout {
+                        // Prevent the initial input focus
+                        isFocusableInTouchMode = true
+
                         padding = dip(16)
                         tintedTextView {
                             textSize = 18f
@@ -180,13 +183,15 @@ class MainActivity : AppCompatActivity() {
                             }
                             bottomPadding = dip(24)
                         }
+                        tintedTextView {
+                            textSize = 18f
+                            text = "Logs"
+                            //gravity = Gravity.CENTER
+                            bottomPadding = dip(12)
+                        }
                         lastReq = tintedTextView {
                             text = ""
-                        }
-                        lastErr = tintedTextView {
-                            text = ""
-                            bottomPadding = dip(24)
-                        }
+                        } // TODO rename to logs and style it?
                         tintedTextView {
                             textSize = 18f
                             text = "Settings"
@@ -218,7 +223,6 @@ class MainActivity : AppCompatActivity() {
                         user!!.setText(App.prefs!!.getString("user", ""))
                         pass!!.setText(App.prefs!!.getString("pass", ""))
                         lastReq!!.setText("Last request: ${App.prefs!!.getString("last_request", "never")}")
-                        lastErr!!.setText("Last error: ${App.prefs!!.getString("last_error", "never")}")
                         tintedButton("Save") {
                             setOnClickListener {
                                 val editor = App.prefs!!.edit()
@@ -247,10 +251,14 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         toast("onresume")
         database.use {
-            var data = select("logs", "_id", "status_code", "response").parseList(logParser)
-
+            var out: String = ""
+            val logs = select("logs", "_id", "date", "status_code", "response").parseList(logParser)
+            for (log in logs) {
+                out = out + "${log.date}: ${log.status_code} => ${log.response}\n"
+            }
             I++
-            lastReq!!.setText("Last request\n\n ${data}: ${App.prefs!!.getString("last_error", "never")}")
+            // TODO remov oldest logs and only keep last 5
+            lastReq!!.setText(out)
         }
     }
 
@@ -395,6 +403,7 @@ class LocationTrackingService    : Service() {
                             values.put("status_code", response.httpStatusCode)
                             values.put("response", String(response.data))
                             values.put("_id", ts)
+                            values.put("date", date)
                             insert("logs", null, values)
                         }
                         when (result) {
