@@ -4,7 +4,6 @@ import android.Manifest
 import android.app.*
 import android.content.*
 import android.content.pm.PackageManager
-import android.content.res.Resources
 import android.database.sqlite.SQLiteDatabase
 import android.location.Location
 import android.location.LocationManager
@@ -15,7 +14,6 @@ import android.util.Log
 import android.support.v7.app.AppCompatActivity
 import android.support.v4.app.ActivityCompat
 import android.os.Bundle
-import android.os.Handler
 import android.support.v7.app.NotificationCompat
 import com.github.kittinunf.fuel.Fuel
 import com.github.kittinunf.result.Result
@@ -24,15 +22,11 @@ import org.json.JSONObject
 import org.jetbrains.anko.appcompat.v7.tintedEditText
 import org.jetbrains.anko.design.textInputLayout
 import android.provider.Settings
-import android.support.v4.content.LocalBroadcastManager
-import android.support.v4.widget.SwipeRefreshLayout
 import android.support.v7.widget.SwitchCompat
 import android.text.InputType
 import android.text.format.DateFormat
-import android.view.Gravity
 import android.view.ViewManager
 import android.widget.EditText
-import android.widget.ScrollView
 import android.widget.TextView
 import com.github.kittinunf.fuel.core.FuelManager
 import org.jetbrains.anko.appcompat.v7.tintedButton
@@ -40,6 +34,7 @@ import org.jetbrains.anko.appcompat.v7.tintedTextView
 import org.jetbrains.anko.custom.ankoView
 import org.jetbrains.anko.db.*
 import org.jetbrains.anko.support.v4.swipeRefreshLayout
+import org.json.JSONArray
 import java.util.concurrent.atomic.AtomicInteger
 
 
@@ -55,10 +50,10 @@ inline fun ViewManager.switchCompat(theme: Int = 0, init: SwitchCompat.() -> Uni
 class App : Application() {
     companion object {
         lateinit var instance: App
-            private  set
+            private set
 
         lateinit var cm: ConnectivityManager
-            private  set
+            private set
 
         lateinit var prefs: SharedPreferences
             private set
@@ -80,7 +75,7 @@ class App : Application() {
     }
 }
 
-class DbHelper : ManagedSQLiteOpenHelper(App.instance, "locations.db", null, 5) {
+class DbHelper : ManagedSQLiteOpenHelper(App.instance, "locations.db", null, 8) {
 
     companion object {
         val instance by lazy { DbHelper() }
@@ -88,19 +83,18 @@ class DbHelper : ManagedSQLiteOpenHelper(App.instance, "locations.db", null, 5) 
 
     override fun onCreate(db: SQLiteDatabase?) {
         db?.createTable("locations", true,
-                "_id" to INTEGER + PRIMARY_KEY,
+                "_id" to REAL + PRIMARY_KEY,
                 "lat" to REAL,
                 "lng" to REAL,
-                "ts" to INTEGER
+                "ts" to REAL
         )
         db?.createTable("logs", true,
-                "_id" to INTEGER + PRIMARY_KEY,
+                "_id" to REAL + PRIMARY_KEY,
                 "date" to TEXT,
                 "status_code" to INTEGER,
                 "response" to TEXT
         )
     }
-
 
     override fun onUpgrade(db: SQLiteDatabase?, oldVersion: Int, newVersion: Int) {
         db?.dropTable("locations", true)
@@ -108,14 +102,17 @@ class DbHelper : ManagedSQLiteOpenHelper(App.instance, "locations.db", null, 5) 
         onCreate(db)
     }
 }
+
 // Access property for Context
 val Context.database: DbHelper
     get() = DbHelper.instance
 
-class Loc(val _id: Int, val ts: Int, val lat: Float, val lng: Float)
+// Model class and parser for the SQLite helper
+class Loc(val _id: Double, val ts: Double, val lat: Float, val lng: Float)
 val locParser = classParser<Loc>()
-class ReqLog(val _id: Int, val date: String, val status_code: Int, val response: String)
+class ReqLog(val _id: Double, val date: String, val status_code: Int, val response: String)
 val logParser = classParser<ReqLog>()
+
 
 class MainActivity : AppCompatActivity() {
 
@@ -152,7 +149,7 @@ class MainActivity : AppCompatActivity() {
             setOnRefreshListener {
                 reloadLogs()
                 this.isRefreshing = false
-                toast("logs reloaded successfully")
+                toast("Logs reloaded successfully")
             }
             scrollView {
                 verticalLayout {
@@ -246,11 +243,13 @@ class MainActivity : AppCompatActivity() {
     private fun reloadLogs() {
         database.use {
             var out: String = ""
-            val logs = select("logs", "_id", "date", "status_code", "response").parseList(logParser)
+            val logs = select("logs", "_id", "date", "status_code", "response")
+                    .orderBy("_id", SqlOrderDirection.DESC)
+                    .limit(5)
+                    .parseList(logParser)
             for (log in logs) {
-                out = out + "${log.date}: ${log.status_code} => ${log.response}\n"
+                out = out + "${log.date}: status=${log.status_code} response=${log.response}\n"
             }
-            // TODO remov oldest logs and only keep last 5
             logsView!!.setText(out)
         }
     }
@@ -271,7 +270,6 @@ private object notificationID {
         get() = c.incrementAndGet()
 }
 
-
 class LocationTrackingService    : Service() {
     var notifID: Int = 0
 
@@ -285,8 +283,7 @@ class LocationTrackingService    : Service() {
 
     override fun onCreate() {
         try {
-            var listener = locationListeners[0]
-            locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, INTERVAL, DISTANCE, listener)
+            locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, INTERVAL, DISTANCE, locationListener)
         } catch (e: SecurityException) {
             Log.e(TAG, "Fail to request location update", e)
         } catch (e: IllegalArgumentException) {
@@ -296,18 +293,22 @@ class LocationTrackingService    : Service() {
         FuelManager.instance.baseHeaders = mapOf(
                 "User-Agent" to "Are You Tracking Me? - ${BuildConfig.VERSION_NAME}")
 
+        var ni = intentFor<MainActivity>()
+        var pi = PendingIntent.getActivities(this, 0, arrayOf(ni), 0)
         var notif = NotificationCompat.Builder(this@LocationTrackingService)
                 .setContentTitle("Yes, I'm tracking you!")
                 .setSubText("Running")
                 .setOngoing(true)
                 .setVisibility(NotificationCompat.VISIBILITY_SECRET)
                 .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentIntent(pi)
                 .build()
 
-        val mNotifyMgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        //val mNotifyMgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         // Builds the notification and issues it.
         notifID = notificationID.id
-        mNotifyMgr.notify(notifID, notif)
+
+        startForeground(notifID, notif)
     }
 
     override fun onDestroy() {
@@ -315,89 +316,128 @@ class LocationTrackingService    : Service() {
         val mNotifyMgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         mNotifyMgr.cancel(notifID)
         if (locationManager != null)
-            for (i in 0..locationListeners.size) {
-                try {
-                    locationManager?.removeUpdates(locationListeners[i])
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to remove location listeners")
-                }
+            try {
+                locationManager?.removeUpdates(locationListener)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to remove location listeners")
             }
     }
 
-
     companion object {
         val TAG = "LocationTrackingService"
-        //val INTERVAL = 600000.toLong()
-        val INTERVAL = 5000.toLong()
+        val INTERVAL = 500000.toLong()
         val DISTANCE = 0.toFloat() // In meters
 
-        //var lol = applicationContext.getSharedPreferences(PREFS_FILENAME, 0)
-        val locationListeners = arrayOf(
-                LTRLocationListener(LocationManager.GPS_PROVIDER)
-                //LTRLocationListener(LocationManager.NETWORK_PROVIDER)
-        )
+        val locationListener = LTRLocationListener(LocationManager.GPS_PROVIDER)
 
         class LTRLocationListener(provider: String) : android.location.LocationListener {
 
-            val lastLocation = Location(provider)
-
             override fun onLocationChanged(location: Location?) {
-                lastLocation.set(location)
+                Log.d(TAG, "new location update")
                 val ts = System.currentTimeMillis()
-                var payload = JSONObject()
-                payload.put("lat", location!!.latitude)
-                payload.put("lng", location!!.longitude)
-                payload.put("ts", ts)
-                payload.put("device_id", App.deviceId)
 
-                Log.i(TAG, "Sending payload to server")
-
-                // Fetch creds from settings
-                val endpoint = App.prefs!!.getString("endpoint", "")
-                val user = App.prefs!!.getString("user", "")
-                val pass = App.prefs!!.getString("pass", "")
-
-                var activeNetwork: NetworkInfo  = App.cm.getActiveNetworkInfo()
+                // Determine if the device have access to the network
+                val activeNetwork: NetworkInfo? = App.cm.getActiveNetworkInfo()
+                var networkOk: Boolean = false
                 if (activeNetwork != null) {
                     if (activeNetwork.isConnectedOrConnecting()) {
-                        // TODO use this, try to POST data, and POST previous offline saved data
-                        // TODO ge0 bulk support?
+                        networkOk = true
                     }
                 }
+
+                if (networkOk) {
+
+                    doAsync {
+
+                        var locCount = 1
+
+                        // Fetch creds from settings
+                        val endpoint = App.prefs!!.getString("endpoint", "")
+                        val user = App.prefs!!.getString("user", "")
+                        val pass = App.prefs!!.getString("pass", "")
+
+                        if (endpoint != "") {
+
+                            // Build the JSON payload
+                            val payload = JSONObject()
+                            payload.put("device_id", App.deviceId)
+                            val locations = JSONArray()
+
+                            val currentLoc = JSONObject()
+                            currentLoc.put("lat", location!!.latitude)
+                            currentLoc.put("lng", location!!.longitude)
+                            currentLoc.put("ts", ts)
+                            locations.put(currentLoc)
+
+                            App.instance.applicationContext.database.use {
+                                // Fetch the previously saved locations to send them in this batch
+                                val locs = select("locations", "_id", "ts", "lat", "lng").parseList(locParser)
+                                locCount += locs.size
+                                for (loc in locs) {
+                                    val jloc = JSONObject()
+                                    jloc.put("lat", loc.lat)
+                                    jloc.put("lng", loc.lng)
+                                    jloc.put("ts", loc.ts)
+                                    locations.put(jloc)
+                                }
+                            }
+                            payload.put("locations", locations)
+
+                            Log.i(TAG, "Sending payload with $locCount locations to server")
+
+                            val date = DateFormat.format("yyyy-MM-ddThh:mm:ss a", java.util.Date()).toString()
+                            Fuel.post(endpoint).authenticate(user, pass).body(payload.toString()).response { _, response, result ->
+                                App.instance.applicationContext.database.use {
+                                    val values = ContentValues()
+                                    values.put("status_code", response.httpStatusCode)
+                                    values.put("response", String(response.data))
+                                    values.put("_id", ts)
+                                    values.put("date", date)
+                                    insert("logs", null, values)
+                                    // Delete logs that are older than an hour
+                                    delete("logs", "_id < {maxId}", "maxId" to ts - 3600000)
+                                }
+                                when (result) {
+                                    is Result.Failure -> {
+                                        val body = String(response.data)
+                                        val code = response.httpStatusCode
+                                        Log.e(TAG, "failed to send payload $code: $body")
+                                        saveLocationForLater(ts, location)
+                                    }
+                                    is Result.Success -> {
+                                        Log.i(TAG, "payload sent successfully")
+                                        // Delete the buffered locations now that they've been send
+                                        App.instance.applicationContext.database.use {
+                                            delete("locations")
+                                        }
+                                    }
+                                }
+                                // Request end
+                            }
+                        }
+                    }
+
+                } else {
+                    saveLocationForLater(ts, location!!)
+                }
+            }
+
+            private fun saveLocationForLater(ts: Long, location: Location) {
+                Log.i(TAG, "save locations for when the network will be available")
                 App.instance.applicationContext.database.use {
+                    // Store the location for the next time the network is available
                     val values = ContentValues()
-                    values.put("lat", location!!.latitude)
-                    values.put("lng", location!!.longitude)
+                    values.put("lat", location.latitude)
+                    values.put("lng", location.longitude)
                     values.put("ts", ts)
                     values.put("_id", ts)
                     insert("locations", null, values)
-                }
-
-                doAsync {
-                    val date = DateFormat.format("yyyy-MM-ddThh:mm:ss a", java.util.Date()).toString()
-                    Fuel.post(endpoint).authenticate(user, pass).body(payload.toString()).response { _, response, result ->
-                        App.instance.applicationContext.database.use {
-                            val values = ContentValues()
-                            values.put("status_code", response.httpStatusCode)
-                            values.put("response", String(response.data))
-                            values.put("_id", ts)
-                            values.put("date", date)
-                            insert("logs", null, values)
-                        }
-                        when (result) {
-                            is Result.Failure -> {
-                                val body = String(response.data)
-                                val code = response.httpStatusCode
-                                Log.e(TAG, "failed to send payload $code: $body")
-
-                            }
-                            is Result.Success -> {
-                                Log.i(TAG, "payload sent")
-                            }
-                        }
-                    }
+                    // For privacy reasons, delete old locations (only keep the last 12 hours of
+                    // locations)
+                    delete("locations", "_id < {maxId}", "maxId" to ts - 43200000)
                 }
             }
+
             override fun onProviderDisabled(provider: String?) {
             }
 
