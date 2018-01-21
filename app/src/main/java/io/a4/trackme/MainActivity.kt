@@ -378,7 +378,7 @@ class LocationTrackingService    : Service() {
                             Log.i(TAG, "Sending payload with $locCount locations to server")
 
                             val date = DateFormat.format("yyyy-MM-ddThh:mm:ss a", java.util.Date()).toString()
-                            Fuel.post(endpoint).authenticate(user, pass).body(payload.toString()).response { _, response, result ->
+                            Fuel.post(endpoint).header("Content-Type" to "application/json").authenticate(user, pass).body(payload.toString()).response { _, response, result ->
                                 App.instance.applicationContext.database.use {
                                     val values = ContentValues()
                                     values.put("status_code", response.httpStatusCode)
