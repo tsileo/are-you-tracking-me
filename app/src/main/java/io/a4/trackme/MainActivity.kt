@@ -164,7 +164,7 @@ class MainActivity : AppCompatActivity() {
                         text = switchLabel
                         textSize = 18f
                         isChecked = RUNNING
-                        setOnCheckedChangeListener { buttonView, isChecked ->
+                        setOnCheckedChangeListener { _, isChecked ->
                             if (isChecked) {
                                 startService(intent)
                                 this.text = "Running"
