@@ -1,0 +1,17 @@
+sudo: false
+
+language: android
+jdk: oraclejdk8
+
+android:
+  components:
+  - platform-tools
+  - tools
+  - build-tools-26.0.2
+  - android-23
+
+before_install:
+- chmod +x gradlew
+
+script:
+- "./gradlew clean build connectedAndroidTest -PdisablePreDex --stacktrace"
