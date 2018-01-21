@@ -40,9 +40,6 @@ import java.util.concurrent.atomic.AtomicInteger
 
 val PREFS_FILENAME = "io.a4.trackme.prefs"
 
-
-inline fun ViewManager.switchCompat(theme: Int = 0) = switchCompat(theme) {}
-
 inline fun ViewManager.switchCompat(theme: Int = 0, init: SwitchCompat.() -> Unit): SwitchCompat {
     return ankoView({ SwitchCompat(it) }, theme, init)
 }
@@ -217,12 +214,12 @@ class MainActivity : AppCompatActivity() {
                         }
                     }.lparams(width = matchParent, height = wrapContent)
 
-                    endpoint!!.setText(App.prefs!!.getString("endpoint", ""))
-                    user!!.setText(App.prefs!!.getString("user", ""))
-                    pass!!.setText(App.prefs!!.getString("pass", ""))
+                    endpoint!!.setText(App.prefs.getString("endpoint", ""))
+                    user!!.setText(App.prefs.getString("user", ""))
+                    pass!!.setText(App.prefs.getString("pass", ""))
                     tintedButton("Save") {
                         setOnClickListener {
-                            val editor = App.prefs!!.edit()
+                            val editor = App.prefs.edit()
                             editor.putString("endpoint", endpoint!!.text.toString())
                             editor.putString("user", user!!.text.toString())
                             editor.putString("pass", pass!!.text.toString())
@@ -283,7 +280,7 @@ class LocationTrackingService    : Service() {
 
     override fun onCreate() {
         try {
-            locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, INTERVAL, DISTANCE, locationListener)
+            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, INTERVAL, DISTANCE, locationListener)
         } catch (e: SecurityException) {
             Log.e(TAG, "Fail to request location update", e)
         } catch (e: IllegalArgumentException) {
@@ -315,12 +312,7 @@ class LocationTrackingService    : Service() {
         super.onDestroy()
         val mNotifyMgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         mNotifyMgr.cancel(notifID)
-        if (locationManager != null)
-            try {
-                locationManager?.removeUpdates(locationListener)
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to remove location listeners")
-            }
+        locationManager.removeUpdates(locationListener)
     }
 
     companion object {
@@ -352,9 +344,9 @@ class LocationTrackingService    : Service() {
                         var locCount = 1
 
                         // Fetch creds from settings
-                        val endpoint = App.prefs!!.getString("endpoint", "")
-                        val user = App.prefs!!.getString("user", "")
-                        val pass = App.prefs!!.getString("pass", "")
+                        val endpoint = App.prefs.getString("endpoint", "")
+                        val user = App.prefs.getString("user", "")
+                        val pass = App.prefs.getString("pass", "")
 
                         if (endpoint != "") {
 
@@ -365,7 +357,7 @@ class LocationTrackingService    : Service() {
 
                             val currentLoc = JSONObject()
                             currentLoc.put("lat", location!!.latitude)
-                            currentLoc.put("lng", location!!.longitude)
+                            currentLoc.put("lng", location.longitude)
                             currentLoc.put("ts", ts)
                             locations.put(currentLoc)
 
