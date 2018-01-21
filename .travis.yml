@@ -1,17 +1,24 @@
 sudo: false
-
 language: android
 jdk: oraclejdk8
-
 android:
   components:
   - platform-tools
   - tools
   - build-tools-26.0.2
   - android-23
-
 before_install:
 - chmod +x gradlew
-
 script:
 - "./gradlew build -PdisablePreDex --stacktrace"
+deploy:
+  provider: releases
+  api_key:
+    secure: hkNR4TznLHB3fiSTJOUaysVQL1ZyPHlBRNrCipItrVMpcw/V1z0G/yls6iBAgt8d6oFt5G3fJs6bYlPUAuvxh84yauuewVvGUYquEnia9k68jcw2q3M1F+j5fsvf3IRmwWrepeT1yn2+RvW05msRQ+vvNHDze4zrLMmxRKqevrmpiCAsLq3PTJZnLv4YmVZeDxzkM8kKK8IQRlRaFfhyJC5PQy57G6Dr3UCekThv0odIdxp6e0S2TYWizopZHU8r2OghWgcLTGJ2NugVEwIVXUhkWCW2Zoiu2JVeKW4uwX0IqA6VRcygmOYVz5UWa86OKG8fApDMlpzJ5AqO/2rAAiXsKQKZdKz0G6bXmBAByCHxEaFdMCHL6+24zV+n4elqMTOGTG933gR08szhtA39onYQgXLPSyzjSyBlPWAPDTg+42ybQ7ox7uiJC9xqN3Ly1TQdWtNtgBgWOfTOe34ybk6oWaLlbK2+RREoE/Wr2sAUDZZ//0aKNNGo+yE4Iz4kbDtdbUNe7BctbyxMlb5i7+F51SgpHXdyWWahwduEcM4GEROH5cwgxS/GF+Lml1efzQNM/AnHsdXA2+p0zA+RB67Yk5m6NYOd7L2e8SStl1N5FoSwBNXPS92DFIoli8lxxUyn7DxFihRQRoCN/8UmDbWF4vhfPeiPQnKO8/gwPGQ=
+  file:
+    - app/build/outputs/apk/release/app-release-unsigned.apk
+    - app/build/outputs/apk/debug/app-debug.apk
+  skip_cleanup: true
+  on:
+    tags: true
+    repo: tsileo/are-you-tracking-me
